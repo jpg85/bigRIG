@@ -1,0 +1,242 @@
+﻿namespace JsonDataTests;
+
+public class Tests
+{
+    //Very simple test to verify we can parse a json file that is just an empty list
+    [Test]
+    public void TestEmptyList()
+    {
+        var tempFile = Path.GetTempFileName();
+        File.WriteAllText(tempFile, "[]");
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Is.Empty);
+    }
+    //Verify we can serialize a list with a single Version object
+    [Test]
+    public void TestRoundTripSingleVersion()
+    {
+        var tempFile = Path.GetTempFileName();
+        var version = new JsonData.Version
+        {
+            index = 0,
+            name = "version",
+            location = new JsonData.Location
+            {
+                file = "test.h",
+                line = 1,
+                column = 1
+            },
+            versionString = "1.0.0"
+        };
+        var list = new List<JsonData.Base> { version };
+        JsonData.JsonFileHandler.WriteFile(tempFile, list);
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Has.Count.EqualTo(list.Count));
+        Assert.That(data[0], Is.TypeOf<JsonData.Version>());
+        var parsedVersion = (JsonData.Version)data[0];
+        Assert.That(parsedVersion.index, Is.EqualTo(version.index));
+        Assert.That(parsedVersion.name, Is.EqualTo(version.name));
+        Assert.That(parsedVersion.location.file, Is.EqualTo(version.location.file));
+        Assert.That(parsedVersion.versionString, Is.EqualTo(version.versionString));
+    }
+    //Verify we can round trip a single record object
+    [Test]
+    public void TestRoundTripSingleRecord()
+    {
+        var tempFile = Path.GetTempFileName();
+        var record = new JsonData.Record
+        {
+            index = 1,
+            name = "MyStruct",
+            location = new JsonData.Location
+            {
+                file = "test.h",
+                line = 10,
+                column = 5
+            },
+            fields = new List<JsonData.Field>
+            {
+                new JsonData.Field
+                {
+                    name = "myField",
+                    dataTypeHolder = 2,
+                    access = JsonData.Access.Public,
+                    offset = 0,
+                }
+            },
+            functions = new List<int> { 3 },
+            isAnonymous = false,
+            annotations = new List<JsonData.Annotation>
+            {
+                new JsonData.Annotation
+                {
+                    name = "serializable",
+                    attributes = new List<string> { "true" }
+                }
+            },
+            comments = new List<string> { "This is my struct" }
+        };
+        var list = new List<JsonData.Base> { record };
+        JsonData.JsonFileHandler.WriteFile(tempFile, list);
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Has.Count.EqualTo(list.Count));
+        Assert.That(data[0], Is.TypeOf<JsonData.Record>());
+        var parsedRecord = (JsonData.Record)data[0];
+        Assert.That(parsedRecord.index, Is.EqualTo(record.index));
+        Assert.That(parsedRecord.name, Is.EqualTo(record.name));
+        Assert.That(parsedRecord.location.file, Is.EqualTo(record.location.file));
+        Assert.That(parsedRecord.fields, Has.Count.EqualTo(record.fields.Count));
+        Assert.That(parsedRecord.fields[0].name, Is.EqualTo(record.fields[0].name));
+        Assert.That(parsedRecord.fields[0].dataTypeHolder, Is.EqualTo(record.fields[0].dataTypeHolder));
+        Assert.That(parsedRecord.fields[0].access, Is.EqualTo(record.fields[0].access));
+        Assert.That(parsedRecord.functions, Is.EquivalentTo(record.functions));
+    }
+    //Verify we can round trip a function object
+    [Test]
+    public void TestRoundTripSingleFunction()
+    {
+        var tempFile = Path.GetTempFileName();
+        var function = new JsonData.Function
+        {
+            index = 2,
+            name = "MyFunction",
+            location = new JsonData.Location
+            {
+                file = "test.h",
+                line = 20,
+                column = 3
+            },
+            returnTypeHolder = 4,
+            access = JsonData.Access.Public,
+            parameters = new List<JsonData.Parameter>
+            {
+                new JsonData.Parameter
+                {
+                    name = "param1",
+                    dataTypeHolder = 5,
+                    annotations = new List<JsonData.Annotation>
+                    {
+                        new JsonData.Annotation
+                        {
+                            name = "notnull",
+                            attributes = new List<string>()
+                        }
+                    }
+                }
+            },
+            modifiers = new List<JsonData.Modifier> { JsonData.Modifier.Static },
+            annotations = new List<JsonData.Annotation>
+            {
+                new JsonData.Annotation
+                {
+                    name = "deprecated",
+                    attributes = new List<string> { "Use NewFunction instead" }
+                }
+            },
+            comments = new List<string> { "This is my function" }
+        };
+        var list = new List<JsonData.Base> { function };
+        JsonData.JsonFileHandler.WriteFile(tempFile, list);
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Has.Count.EqualTo(list.Count));
+        Assert.That(data[0], Is.TypeOf<JsonData.Function>());
+        var parsedFunction = (JsonData.Function)data[0];
+        Assert.That(parsedFunction.index, Is.EqualTo(function.index));
+        Assert.That(parsedFunction.name, Is.EqualTo(function.name));
+        Assert.That(parsedFunction.location.file, Is.EqualTo(function.location.file));
+        Assert.That(parsedFunction.returnTypeHolder, Is.EqualTo(function.returnTypeHolder));
+        Assert.That(parsedFunction.access, Is.EqualTo(function.access));
+        Assert.That(parsedFunction.parameters, Has.Count.EqualTo(function.parameters.Count));
+        Assert.That(parsedFunction.parameters[0].name, Is.EqualTo(function.parameters[0].name));
+        Assert.That(parsedFunction.parameters[0].dataTypeHolder, Is.EqualTo(function.parameters[0].dataTypeHolder));
+        Assert.That(parsedFunction.parameters[0].annotations, Has.Count.EqualTo(function.parameters[0].annotations.Count));
+        Assert.That(parsedFunction.parameters[0].annotations[0].name, Is.EqualTo(function.parameters[0].annotations[0].name));
+        Assert.That(parsedFunction.modifiers, Is.EquivalentTo(function.modifiers));
+    }
+    //Verify we can round trip a variable object
+    [Test]
+    public void TestRoundTripSingleVariable()
+    {
+        var tempFile = Path.GetTempFileName();
+        var variable = new JsonData.Variable
+        {
+            index = 3,
+            name = "MyVariable",
+            location = new JsonData.Location
+            {
+                file = "test.h",
+                line = 30,
+                column = 2
+            },
+            value = "123",
+            dataType = 6,
+            access = JsonData.Access.Private,
+            modifiers = new List<JsonData.Modifier> { JsonData.Modifier.Const },
+            annotations = new List<JsonData.Annotation>
+            {
+                new JsonData.Annotation
+                {
+                    name = "readonly",
+                    attributes = new List<string>()
+                }
+            },
+            comments = new List<string> { "This is my variable" }
+        };
+        var list = new List<JsonData.Base> { variable };
+        JsonData.JsonFileHandler.WriteFile(tempFile, list);
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Has.Count.EqualTo(list.Count));
+        Assert.That(data[0], Is.TypeOf<JsonData.Variable>());
+        var parsedVariable = (JsonData.Variable)data[0];
+        Assert.That(parsedVariable.index, Is.EqualTo(variable.index));
+        Assert.That(parsedVariable.name, Is.EqualTo(variable.name));
+        Assert.That(parsedVariable.location.file, Is.EqualTo(variable.location.file));
+        Assert.That(parsedVariable.dataType, Is.EqualTo(variable.dataType));
+        Assert.That(parsedVariable.access, Is.EqualTo(variable.access));
+        Assert.That(parsedVariable.modifiers, Is.EquivalentTo(variable.modifiers));
+    }
+    //Verify we can round trip a DataTypeHolder object
+    [Test]
+    public void TestRoundTripSingleDataTypeHolder()
+    {
+        var tempFile = Path.GetTempFileName();
+        var dataTypeHolder = new JsonData.DataTypeHolder
+        {
+            index = 4,
+            name = "MyDataTypeHolder",
+            location = new JsonData.Location
+            {
+                file = "test.h",
+                line = 40,
+                column = 4
+            },
+            dataType = 7,
+            modifiers = new List<JsonData.DataTypeModifier> { JsonData.DataTypeModifier.Pointer },
+            annotations = new List<JsonData.Annotation>
+            {
+                new JsonData.Annotation
+                {
+                    name = "nullable",
+                    attributes = new List<string>()
+                }
+            },
+        };
+        var list = new List<JsonData.Base> { dataTypeHolder };
+        JsonData.JsonFileHandler.WriteFile(tempFile, list);
+        var data = JsonData.JsonFileHandler.ParseFile(tempFile);
+        Assert.That(data, Is.Not.Null);
+        Assert.That(data, Has.Count.EqualTo(list.Count));
+        Assert.That(data[0], Is.TypeOf<JsonData.DataTypeHolder>());
+        var parsedDataTypeHolder = (JsonData.DataTypeHolder)data[0];
+        Assert.That(parsedDataTypeHolder.index, Is.EqualTo(dataTypeHolder.index));
+        Assert.That(parsedDataTypeHolder.name, Is.EqualTo(dataTypeHolder.name));
+        Assert.That(parsedDataTypeHolder.location.file, Is.EqualTo(dataTypeHolder.location.file));
+        Assert.That(parsedDataTypeHolder.dataType, Is.EqualTo(dataTypeHolder.dataType));
+        Assert.That(parsedDataTypeHolder.modifiers, Is.EquivalentTo(dataTypeHolder.modifiers));
+    }
+}

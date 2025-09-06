@@ -14,4 +14,8 @@
     <PackageReference Include="libclang" Version="20.1.2" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../JsonData/JsonData.csproj" />
+  </ItemGroup>
+
 </Project>
