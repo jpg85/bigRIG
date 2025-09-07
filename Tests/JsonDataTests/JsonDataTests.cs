@@ -61,7 +61,7 @@ public class Tests
                 new JsonData.Field
                 {
                     name = "myField",
-                    dataTypeHolder = 2,
+                    qualifiedType = 2,
                     access = JsonData.Access.Public,
                     offset = 0,
                 }
@@ -90,7 +90,7 @@ public class Tests
         Assert.That(parsedRecord.location.file, Is.EqualTo(record.location.file));
         Assert.That(parsedRecord.fields, Has.Count.EqualTo(record.fields.Count));
         Assert.That(parsedRecord.fields[0].name, Is.EqualTo(record.fields[0].name));
-        Assert.That(parsedRecord.fields[0].dataTypeHolder, Is.EqualTo(record.fields[0].dataTypeHolder));
+        Assert.That(parsedRecord.fields[0].qualifiedType, Is.EqualTo(record.fields[0].qualifiedType));
         Assert.That(parsedRecord.fields[0].access, Is.EqualTo(record.fields[0].access));
         Assert.That(parsedRecord.functions, Is.EquivalentTo(record.functions));
     }
@@ -109,22 +109,14 @@ public class Tests
                 line = 20,
                 column = 3
             },
-            returnTypeHolder = 4,
+            returnQualifiedType = 4,
             access = JsonData.Access.Public,
             parameters = new List<JsonData.Parameter>
             {
                 new JsonData.Parameter
                 {
                     name = "param1",
-                    dataTypeHolder = 5,
-                    annotations = new List<JsonData.Annotation>
-                    {
-                        new JsonData.Annotation
-                        {
-                            name = "notnull",
-                            attributes = new List<string>()
-                        }
-                    }
+                    qualifiedType = 5,
                 }
             },
             modifiers = new List<JsonData.Modifier> { JsonData.Modifier.Static },
@@ -148,13 +140,11 @@ public class Tests
         Assert.That(parsedFunction.index, Is.EqualTo(function.index));
         Assert.That(parsedFunction.name, Is.EqualTo(function.name));
         Assert.That(parsedFunction.location.file, Is.EqualTo(function.location.file));
-        Assert.That(parsedFunction.returnTypeHolder, Is.EqualTo(function.returnTypeHolder));
+        Assert.That(parsedFunction.returnQualifiedType, Is.EqualTo(function.returnQualifiedType));
         Assert.That(parsedFunction.access, Is.EqualTo(function.access));
         Assert.That(parsedFunction.parameters, Has.Count.EqualTo(function.parameters.Count));
         Assert.That(parsedFunction.parameters[0].name, Is.EqualTo(function.parameters[0].name));
-        Assert.That(parsedFunction.parameters[0].dataTypeHolder, Is.EqualTo(function.parameters[0].dataTypeHolder));
-        Assert.That(parsedFunction.parameters[0].annotations, Has.Count.EqualTo(function.parameters[0].annotations.Count));
-        Assert.That(parsedFunction.parameters[0].annotations[0].name, Is.EqualTo(function.parameters[0].annotations[0].name));
+        Assert.That(parsedFunction.parameters[0].qualifiedType, Is.EqualTo(function.parameters[0].qualifiedType));
         Assert.That(parsedFunction.modifiers, Is.EquivalentTo(function.modifiers));
     }
     //Verify we can round trip a variable object
@@ -173,17 +163,8 @@ public class Tests
                 column = 2
             },
             value = "123",
-            dataType = 6,
+            qualifiedType = 6,
             access = JsonData.Access.Private,
-            modifiers = new List<JsonData.Modifier> { JsonData.Modifier.Const },
-            annotations = new List<JsonData.Annotation>
-            {
-                new JsonData.Annotation
-                {
-                    name = "readonly",
-                    attributes = new List<string>()
-                }
-            },
             comments = new List<string> { "This is my variable" }
         };
         var list = new List<JsonData.Base> { variable };
@@ -196,16 +177,14 @@ public class Tests
         Assert.That(parsedVariable.index, Is.EqualTo(variable.index));
         Assert.That(parsedVariable.name, Is.EqualTo(variable.name));
         Assert.That(parsedVariable.location.file, Is.EqualTo(variable.location.file));
-        Assert.That(parsedVariable.dataType, Is.EqualTo(variable.dataType));
         Assert.That(parsedVariable.access, Is.EqualTo(variable.access));
-        Assert.That(parsedVariable.modifiers, Is.EquivalentTo(variable.modifiers));
     }
-    //Verify we can round trip a DataTypeHolder object
+    //Verify we can round trip a QualifiedType object
     [Test]
-    public void TestRoundTripSingleDataTypeHolder()
+    public void TestRoundTripSingleQualifiedType()
     {
         var tempFile = Path.GetTempFileName();
-        var dataTypeHolder = new JsonData.DataTypeHolder
+        var qualifiedType = new JsonData.QualifiedType
         {
             index = 4,
             name = "MyDataTypeHolder",
@@ -216,7 +195,7 @@ public class Tests
                 column = 4
             },
             dataType = 7,
-            modifiers = new List<JsonData.DataTypeModifier> { JsonData.DataTypeModifier.Pointer },
+            qualifiers = new List<JsonData.Qualifier> { JsonData.Qualifier.Output },
             annotations = new List<JsonData.Annotation>
             {
                 new JsonData.Annotation
@@ -226,17 +205,17 @@ public class Tests
                 }
             },
         };
-        var list = new List<JsonData.Base> { dataTypeHolder };
+        var list = new List<JsonData.Base> { qualifiedType };
         JsonData.JsonFileHandler.WriteFile(tempFile, list);
         var data = JsonData.JsonFileHandler.ParseFile(tempFile);
         Assert.That(data, Is.Not.Null);
         Assert.That(data, Has.Count.EqualTo(list.Count));
-        Assert.That(data[0], Is.TypeOf<JsonData.DataTypeHolder>());
-        var parsedDataTypeHolder = (JsonData.DataTypeHolder)data[0];
-        Assert.That(parsedDataTypeHolder.index, Is.EqualTo(dataTypeHolder.index));
-        Assert.That(parsedDataTypeHolder.name, Is.EqualTo(dataTypeHolder.name));
-        Assert.That(parsedDataTypeHolder.location.file, Is.EqualTo(dataTypeHolder.location.file));
-        Assert.That(parsedDataTypeHolder.dataType, Is.EqualTo(dataTypeHolder.dataType));
-        Assert.That(parsedDataTypeHolder.modifiers, Is.EquivalentTo(dataTypeHolder.modifiers));
+        Assert.That(data[0], Is.TypeOf<JsonData.QualifiedType>());
+        var parsedQualifiedType = (JsonData.QualifiedType)data[0];
+        Assert.That(parsedQualifiedType.index, Is.EqualTo(qualifiedType.index));
+        Assert.That(parsedQualifiedType.name, Is.EqualTo(qualifiedType.name));
+        Assert.That(parsedQualifiedType.location.file, Is.EqualTo(qualifiedType.location.file));
+        Assert.That(parsedQualifiedType.dataType, Is.EqualTo(qualifiedType.dataType));
+        Assert.That(parsedQualifiedType.qualifiers, Is.EquivalentTo(qualifiedType.qualifiers));
     }
 }

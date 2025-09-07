@@ -24,12 +24,11 @@ public enum DataTypeKind
     Record,
     Enum,
 }
-public enum DataTypeModifier
+public enum Qualifier
 {
     Const,
     Reference,
     Output,
-    Pointer,
 }
 public class Location
 {
@@ -45,15 +44,14 @@ public class Annotation
 public class Field
 {
     public string name { get; set; } = string.Empty;
-    public int dataTypeHolder { get; set; }
+    public int qualifiedType { get; set; }
     public uint offset { get; set; }
     public Access access { get; set; }
 }
 public class Parameter
 {
     public string name { get; set; } = string.Empty;
-    public int dataTypeHolder { get; set; }
-    public List<Annotation> annotations { get; set; } = new List<Annotation>();
+    public int qualifiedType { get; set; }
 }
 
 [JsonPolymorphic(UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
@@ -62,7 +60,7 @@ public class Parameter
 [JsonDerivedType(typeof(Function), "Function")]
 [JsonDerivedType(typeof(Variable), "Variable")]
 [JsonDerivedType(typeof(DataType), "DataType")]
-[JsonDerivedType(typeof(DataTypeHolder), "DataTypeHolder")]
+[JsonDerivedType(typeof(QualifiedType), "QualifiedType")]
 public class Base
 {
     public int index { get; set; }
@@ -83,7 +81,7 @@ public class Record : Base
 }
 public class Function : Base
 {
-    public int returnTypeHolder { get; set; }
+    public int returnQualifiedType { get; set; }
     public Access access { get; set; }
     public List<Parameter> parameters { get; set; } = new List<Parameter>();
     public List<Modifier> modifiers { get; set; } = new List<Modifier>();
@@ -93,21 +91,19 @@ public class Function : Base
 public class Variable : Base
 {
     public required string value { get; set; } = string.Empty;
-    public int dataType { get; set; }
+    public int qualifiedType { get; set; }
     public Access access { get; set; }
-    public List<Modifier> modifiers { get; set; } = new List<Modifier>();
-    public List<Annotation> annotations { get; set; } = new List<Annotation>();
     public List<string> comments { get; set; } = new List<string>();
 }
 public class DataType : Base
 {
     //TODO: Fill out the details of this class
-    public required DataTypeKind kind { get; set; }
+    public DataTypeKind kind { get; set; }
 }
-public class DataTypeHolder : Base
+public class QualifiedType : Base
 {
     public int dataType { get; set; }
-    public List<DataTypeModifier> modifiers { get; set; } = new List<DataTypeModifier>();
+    public List<Qualifier> qualifiers { get; set; } = new List<Qualifier>();
     public List<Annotation> annotations { get; set; } = new List<Annotation>();
 }
 
@@ -118,6 +114,7 @@ public static class JsonFileHandler
         var json = File.ReadAllText(fileName);
         var options = new JsonSerializerOptions
         {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             Converters =
             {
                 new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
@@ -129,13 +126,14 @@ public static class JsonFileHandler
     {
         var options = new JsonSerializerOptions
         {
+            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
             WriteIndented = true,
             Converters =
             {
                 new JsonStringEnumConverter(JsonNamingPolicy.CamelCase)
             }
         };
-        var json = JsonSerializer.Serialize(data, options);
-        File.WriteAllText(fileName, json);
+        var json = JsonSerializer.SerializeToUtf8Bytes(data, options);
+        File.WriteAllBytes(fileName, json);
     }
 }
