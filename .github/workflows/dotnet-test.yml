@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  build:
+  build_ubuntu:
     runs-on: ubuntu-latest
     steps:
       - name: Install libclang
@@ -28,5 +28,24 @@ jobs:
         run: dotnet restore
       - name: Build
         run: dotnet build --configuration Release
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --verbosity normal
+  build_windows:
+    runs-on: windows-latest
+    steps:
+      - name: Install libclang
+        run: choco install llvm -y
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Copy libclang.dll to test output
+        run: cp "C:\Program Files\LLVM\bin\libclang.dll" "${{ github.workspace }}/Tests/RigGenTests/bin/Release/net9.0/"
       - name: Run tests
         run: dotnet test --configuration Release --no-build --verbosity normal
