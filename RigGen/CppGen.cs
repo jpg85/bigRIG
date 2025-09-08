@@ -1,13 +1,12 @@
 namespace RigGen;
 
-using ClangSharp;
 using ClangSharp.Interop;
 using JsonData;
 
 public class CppGen
 {
     public required IEnumerable<string> directories { get; set; }
-    private readonly List<JsonData.Base> parsedData = new List<JsonData.Base>();
+    private readonly List<Base> parsedData = new List<Base>();
     private bool IsPathUser(string path)
     {
         return directories.Any(whitelistedDir =>
@@ -17,17 +16,17 @@ public class CppGen
     {
         return Path.GetFullPath(new Uri(path).LocalPath);
     }
-    private void FillLocation(JsonData.Base node, CXCursor cursor)
+    private Location GetLocation(CXCursor cursor)
     {
         cursor.Location.GetFileLocation(out var file, out uint line, out uint column, out uint _);
-        node.location = new JsonData.Location
+        return new Location
         {
             file = NormalizedPath(file.Name.ToString()),
             line = (int)line,
             column = (int)column
         };
     }
-    private void AddNode(JsonData.Base node)
+    private void AddNode(Base node)
     {
         node.index = parsedData.Count;
         parsedData.Add(node);
@@ -65,8 +64,7 @@ public class CppGen
         }
         return headerFiles;
     }
-
-    internal List<JsonData.Base> Generate(string outputDir, IEnumerable<string> additionalArgs)
+    public List<Base> Generate(string outputDir, IEnumerable<string> additionalArgs)
     {
         var files = CollectHeaderFiles();
         //Write files to a temporary output cpp file, which will then be parsed by libclang
@@ -81,36 +79,32 @@ public class CppGen
         }
 
         //Pull the files into libclang
+        var index = CXIndex.Create();
+        var args = new ReadOnlySpan<string>(additionalArgs.ToArray());
+        var unit = CXTranslationUnit.CreateFromSourceFile(index, tempFile, args, null);
+        if (unit == null)
+        {
+            throw new Exception("Failed to create translation unit");
+        }
+        var decls = new List<CXCursor>();
+        var records = new List<CXCursor>();
+        var functions = new List<CXCursor>();
         unsafe
         {
-            var index = CXIndex.Create();
-            var args = new ReadOnlySpan<string>(additionalArgs.ToArray());
-            var unit = CXTranslationUnit.CreateFromSourceFile(index, tempFile, args, null);
-            if (unit == null)
-            {
-                throw new Exception("Failed to create translation unit");
-            }
-            var location = unit.GetLocation(unit.GetFile(tempFile), 0, 0);
             unit.Cursor.VisitChildren((cursor, _, _) =>
             {
                 switch (cursor.Kind)
                 {
                     case CXCursorKind.CXCursor_UsingDeclaration:
-                        //Using declarations are a means of introducing annotations
-                        ParseUsingDeclaration(cursor);
-                        break;
                     case CXCursorKind.CXCursor_TypedefDecl:
-                        //Typedefs are a means of introducing annotations
-                        ParseTypedefDeclaration(cursor);
+                        decls.Add(cursor);
                         break;
                     case CXCursorKind.CXCursor_ClassDecl:
                     case CXCursorKind.CXCursor_StructDecl:
-                        //If a class or struct is encountered here, only parse it if annotation requires it
-                        ParseClassDeclaration(cursor);
+                        records.Add(cursor);
                         break;
                     case CXCursorKind.CXCursor_FunctionDecl:
-                        //Function declarations are the most important, they tell us what types are needed
-                        ParseFunctionDeclaration(cursor);
+                        functions.Add(cursor);
                         break;
                     case CXCursorKind.CXCursor_Namespace:
                         //Need to recurse into the namespace to find more declarations
@@ -121,45 +115,73 @@ public class CppGen
                 return CXChildVisitResult.CXChildVisit_Continue;
             }, new CXClientData(IntPtr.Zero));
         }
+        //While it shouldn't matter the order of traversal, we'll traverse records first, followed by functions, and lastly annotations
+        foreach (var node in records)
+        {
+            ParseClassDeclaration(node);
+        }
+        foreach (var node in functions)
+        {
+            ParseFunctionDeclaration(node, false);
+        }
+        foreach (var node in decls)
+        {
+            ParseTypedefDeclaration(node);
+        }
         return parsedData;
-    }
-    void ParseUsingDeclaration(CXCursor cursor)
-    {
     }
     void ParseTypedefDeclaration(CXCursor cursor)
     {
     }
-    void ParseClassDeclaration(CXCursor cursor)
+    Access GetAccessFromSpecifier(CX_CXXAccessSpecifier specifier)
     {
+        switch (specifier)
+        {
+            case CX_CXXAccessSpecifier.CX_CXXPublic:
+                return Access.Public;
+            case CX_CXXAccessSpecifier.CX_CXXProtected:
+                return Access.Protected;
+            case CX_CXXAccessSpecifier.CX_CXXPrivate:
+                return Access.Private;
+            default:
+                return Access.Public;
+        }
     }
-    void ParseFunctionDeclaration(CXCursor cursor)
+    int ParseClassDeclaration(CXCursor cursor)
     {
-        var functionNode = new Function();
-        FillLocation(functionNode, cursor);
-        if (!IsPathUser(functionNode.location.file))
-            return;
-        functionNode.name = FullyQualifiedName(cursor);
-        functionNode.access = Access.Public;   //Functions in the user path will be assumed public
-        functionNode.modifiers = new List<Modifier>(); //Function declarations do not have modifiers
-        functionNode.annotations = new List<Annotation>(); //TODO: Determine annotations
-        functionNode.comments = new List<string>(); //TODO: Extract comments
+        var recordNode = new Record();
+        recordNode.location = GetLocation(cursor);
+        if (!IsPathUser(recordNode.location.file))
+            return -1;
+        recordNode.name = FullyQualifiedName(cursor);
+        //It is possible while parsing types to encounter the same class multiple times
+        //So return the existing index if this class has already been parsed
+        var existingNode = parsedData.OfType<Record>().FirstOrDefault(r => r.name == recordNode.name);
+        if (existingNode != null)
+        {
+            return existingNode.index;
+        }
+
+        recordNode.isAnonymous = cursor.IsAnonymous;
+        //Collect the different cursors in an unsafe context
+        //Then parse them not in an unsafe context
+        var baseClasses = new List<CXCursor>();
+        var fields = new List<CXCursor>();
+        var methods = new List<CXCursor>();
         unsafe
         {
             cursor.VisitChildren((childCursor, _, _) =>
             {
                 switch (childCursor.Kind)
                 {
-                    case CXCursorKind.CXCursor_ParmDecl:
-                        //ParmDecl is a parameter declaration
-                        functionNode.parameters.Add(new Parameter
-                        {
-                            name = childCursor.Spelling.ToString(),
-                            qualifiedType = ParseTypeKind(childCursor.Type)
-                        });
+                    case CXCursorKind.CXCursor_CXXBaseSpecifier:
+                        baseClasses.Add(childCursor);
                         break;
-                    case CXCursorKind.CXCursor_TypeRef:
-                        //This is the return type
-                        functionNode.returnQualifiedType = ParseTypeKind(childCursor.Type);
+                    case CXCursorKind.CXCursor_FieldDecl:
+                        fields.Add(childCursor);
+                        break;
+                    case CXCursorKind.CXCursor_CXXMethod:
+                        methods.Add(childCursor);
                         break;
                     default:
                         break;
@@ -167,14 +189,121 @@ public class CppGen
                 return CXChildVisitResult.CXChildVisit_Continue;
             }, new CXClientData(IntPtr.Zero));
         }
-        AddNode(functionNode);
+        foreach (var node in baseClasses)
+        {
+            var baseRecord = new RecordBase();
+            baseRecord.isVirtual = node.IsVirtualBase;
+            baseRecord.access = GetAccessFromSpecifier(node.CXXAccessSpecifier);
+            baseRecord.baseRecord = ParseClassDeclaration(clang.getCursorReferenced(node));
+            recordNode.bases.Add(baseRecord);
+        }
+        foreach (var node in fields)
+        {
+            var fieldNode = new Field();
+            fieldNode.name = node.Spelling.ToString();
+            fieldNode.access = Access.Public;
+            fieldNode.qualifiedType = ParseTypeKind(node.Type, GetLocation(node));
+            fieldNode.offset = (uint)node.OffsetOfField;
+            recordNode.fields.Add(fieldNode);
+        }
+        foreach (var node in methods)
+        {
+            recordNode.functions.Add(ParseFunctionDeclaration(node, true));
+        }
+        AddNode(recordNode);
+        return recordNode.index;
     }
-    int ParseUnqualifiedType(CXType type)
+    int ParseFunctionDeclaration(CXCursor cursor, bool isMethod)
     {
+        var functionNode = new Function();
+        functionNode.location = GetLocation(cursor);
+        //Methods have already been decided to be parsed, so always parse them
+        if (!isMethod && !IsPathUser(functionNode.location.file))
+        {
+            return -1;
+        }
+
+        functionNode.name = FullyQualifiedName(cursor);
+        //It is possible for global functions to have multiple declarations, so only parse the first one
+        if (!isMethod && parsedData.OfType<Function>().Any(f => f.name == functionNode.name))
+        {
+            return -1;
+        }
+
+        functionNode.access = Access.Public;   //Functions in the user path will be assumed public
+        if (isMethod)
+        {
+            functionNode.access = GetAccessFromSpecifier(cursor.CXXAccessSpecifier);
+            var prettyPrinting = cursor.GetPrettyPrinted(new CXPrintingPolicy()).ToString();
+            if (prettyPrinting.StartsWith("static "))   //Static methods have static at the start of the declaration
+            {
+                functionNode.modifiers.Add(Modifier.Static);
+            }
+            else
+            {
+                //Non-static methods can be const, virtual, or pure virtual
+                if (prettyPrinting.Contains(") const")) //Want the const at the end of the parameter list
+                {
+                    functionNode.modifiers.Add(Modifier.Const);
+                }
+                if (prettyPrinting.StartsWith("virtual "))
+                {
+                    if (prettyPrinting.EndsWith("= 0")) //Pure virtual functions have = 0 at the end
+                    {
+                        functionNode.modifiers.Add(Modifier.PureVirtual);
+                    }
+                    else
+                    {
+                        functionNode.modifiers.Add(Modifier.Virtual);
+                    }
+                }
+            }
+        }
+        functionNode.annotations = new List<Annotation>(); //TODO: Determine annotations
+        functionNode.comments = new List<string>(); //TODO: Extract comments
+        functionNode.returnQualifiedType = ParseTypeKind(cursor.ResultType, functionNode.location);
+        //Getting both the parameter name and the parameter type requires walking further down the AST
+        //Get a list of the cursors that point to the parameters, and then walk them in a safe context
+        var paramNodes = new List<CXCursor>();
+        unsafe
+        {
+            cursor.VisitChildren((childCursor, _, _) =>
+            {
+                if (childCursor.kind == CXCursorKind.CXCursor_ParmDecl)
+                {
+                    paramNodes.Add(childCursor);
+                }
+                return CXChildVisitResult.CXChildVisit_Continue;
+            }, new CXClientData(IntPtr.Zero));
+        }
+        foreach (var node in paramNodes)
+        {
+            functionNode.parameters.Add(new Parameter
+            {
+                name = node.Spelling.ToString(),
+                qualifiedType = ParseTypeKind(node.Type, GetLocation(node))
+            });
+        }
+        AddNode(functionNode);
+        return functionNode.index;
+    }
+    int ParseUnqualifiedType(CXType type, Location location)
+    {
+        var name = type.Spelling.ToString();
+        //See if this type node already exists, if so, return that index
+        //Match is determined by name only because all other decoration should be removed by this point
+        var existingNode = parsedData.OfType<DataType>().FirstOrDefault(dt => dt.name == name);
+        if (existingNode != null)
+        {
+            return existingNode.index;
+        }
+        //Otherwise, create a new type node
         var typeNode = new DataType
         {
-            name = type.Spelling.ToString(),
+            name = name,
+            location = location
         };
+
         AddNode(typeNode);
         return typeNode.index;
     }
@@ -184,7 +313,8 @@ public class CppGen
         var qualifiers = new List<Qualifier>();
         if (unqualifiedType.kind == CXTypeKind.CXType_Pointer)
         {
-            throw new NotSupportedException("Pointer types are not supported");
+            qualifiers.Add(Qualifier.Pointer);
+            unqualifiedType = clang.getPointeeType(unqualifiedType);
         }
         if (unqualifiedType.kind == CXTypeKind.CXType_LValueReference || unqualifiedType.kind == CXTypeKind.CXType_RValueReference)
         {
@@ -193,20 +323,36 @@ public class CppGen
         }
         if (unqualifiedType.IsConstQualified)
         {
+            //Technically we lose a const pointer and pointer to const differentiation, but for interopability, that distinction isn't important
             qualifiers.Add(Qualifier.Const);
             unqualifiedType = unqualifiedType.UnqualifiedType;
         }
         return qualifiers;
     }
-    int ParseTypeKind(CXType typeKind)
+    int ParseTypeKind(CXType typeKind, Location location)
     {
-        var qualifiers = GetQualifiers(typeKind, out var unqualifiedType);
+        var canonincalType = typeKind.CanonicalType;
+        var qualifiers = GetQualifiers(canonincalType, out var unqualifiedType);
         var typeNode = new QualifiedType
         {
-            name = typeKind.Spelling.ToString(),
-            dataType = ParseUnqualifiedType(unqualifiedType),
+            name = canonincalType.Spelling.ToString(),
+            location = location,
+            dataType = ParseUnqualifiedType(unqualifiedType, location),
             qualifiers = qualifiers,
         };
+        //See if this qualified type node already exists, if so, return that index
+        //Equality is determined by name, qualifiers, annotations, and dataType
+        var existingNode = parsedData.OfType<QualifiedType>().FirstOrDefault(
+            dt => dt.name == typeNode.name
+            && dt.dataType == typeNode.dataType
+            && dt.qualifiers.SequenceEqual(typeNode.qualifiers)
+            && dt.annotations.SequenceEqual(typeNode.annotations)
+        );
+        if (existingNode != null)
+        {
+            return existingNode.index;
+        }
+        
         AddNode(typeNode);
         return typeNode.index;
     }

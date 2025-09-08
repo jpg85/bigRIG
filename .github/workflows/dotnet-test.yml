@@ -1,0 +1,32 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install libclang
+        run: sudo apt-get update && sudo apt-get install -y libclang-18-dev
+      - name: Set LD_LIBRARY_PATH
+        run: echo "LD_LIBRARY_PATH=/usr/lib/llvm-18/lib:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH" >> $GITHUB_ENV
+      - name: Check for libclang
+        run: ls -l /usr/lib/llvm-18/lib/libclang.so* || ls -l /usr/lib/x86_64-linux-gnu/libclang.so*
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      - name: Restore dependencies
+        run: dotnet restore
+      - name: Build
+        run: dotnet build --configuration Release
+      - name: Run tests
+        run: dotnet test --configuration Release --no-build --verbosity normal

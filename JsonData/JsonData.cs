@@ -29,6 +29,7 @@ public enum Qualifier
     Const,
     Reference,
     Output,
+    Pointer
 }
 public class Location
 {
@@ -71,10 +72,17 @@ public class Version : Base
 {
     public string versionString { get; set; } = string.Empty;
 }
+public class RecordBase
+{
+    public int baseRecord { get; set; }
+    public bool isVirtual { get; set; }
+    public Access access { get; set; }
+}
 public class Record : Base
 {
     public List<Field> fields { get; set; } = new List<Field>();
     public List<int> functions { get; set; } = new List<int>();
+    public List<RecordBase> bases { get; set; } = new List<RecordBase>();
     public bool isAnonymous { get; set; }
     public List<Annotation> annotations { get; set; } = new List<Annotation>();
     public List<string> comments { get; set; } = new List<string>();
