@@ -23,6 +23,8 @@ public enum DataTypeKind
     Array,
     Record,
     Enum,
+    Function,
+    Template,
 }
 public enum Qualifier
 {
@@ -30,6 +32,14 @@ public enum Qualifier
     Reference,
     Output,
     Pointer
+}
+public enum DiagnosticSeverity
+{
+    Ignored = 0,
+    Note = 1,
+    Warning = 2,
+    Error = 3,
+    Fatal = 4,
 }
 public class Location
 {
@@ -54,23 +64,51 @@ public class Parameter
     public string name { get; set; } = string.Empty;
     public int qualifiedType { get; set; }
 }
+public class EnumeratorField
+{
+    public string name { get; set; } = string.Empty;
+    public long value { get; set; }
+}
+public class TemplateArgument
+{
+    public enum Kind
+    {
+        Unknown,
+        Type,
+        Integral,
+    }
+    public Kind kind { get; set; } = Kind.Unknown;
+    /// <summary>
+    /// If kind is Type, this is the index of the DataType
+    /// If kind is Integral, this is the value of the integral
+    /// Otherwise, it is -1
+    /// </summary>
+    public long value { get; set; }
+}
 
 [JsonPolymorphic(UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FallBackToBaseType)]
-[JsonDerivedType(typeof(Version), "Version")]
+[JsonDerivedType(typeof(Message), "Message")]
 [JsonDerivedType(typeof(Record), "Record")]
 [JsonDerivedType(typeof(Function), "Function")]
 [JsonDerivedType(typeof(Variable), "Variable")]
-[JsonDerivedType(typeof(DataType), "DataType")]
 [JsonDerivedType(typeof(QualifiedType), "QualifiedType")]
+[JsonDerivedType(typeof(DataType), "DataType")]
+[JsonDerivedType(typeof(UnknownDataType), "UnknownDataType")]
+[JsonDerivedType(typeof(BuiltinDataType), "BuiltinDataType")]
+[JsonDerivedType(typeof(RecordDataType), "RecordDataType")]
+[JsonDerivedType(typeof(EnumDataType), "EnumDataType")]
+[JsonDerivedType(typeof(FunctionDataType), "FunctionDataType")]
 public class Base
 {
     public int index { get; set; }
     public string name { get; set; } = string.Empty;
     public Location location { get; set; } = new Location();
 }
-public class Version : Base
+public class Message : Base
 {
-    public string versionString { get; set; } = string.Empty;
+    public string message { get; set; } = string.Empty;
+    public string category { get; set; } = string.Empty;
+    public DiagnosticSeverity severity { get; set; }
 }
 public class RecordBase
 {
@@ -105,8 +143,53 @@ public class Variable : Base
 }
 public class DataType : Base
 {
-    //TODO: Fill out the details of this class
-    public DataTypeKind kind { get; set; }
+}
+public class UnknownDataType : DataType
+{
+}
+public class BuiltinDataType : DataType
+{
+    public enum Kind
+    {
+        Void,
+        Nullptr,
+        Unsupported,
+        Bool,
+        Int8,
+        UInt8,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Int64,
+        UInt64,
+        Int128,
+        UInt128,
+        Float,
+        Float16,
+        BFloat16,
+        Double,
+        LongDouble,
+        Float128,
+    }
+    public Kind builtinKind { get; set; } = Kind.Void;
+}
+public class RecordDataType : DataType
+{
+    public int recordType { get; set; }
+    public bool isExternal { get { return recordType == -1; } }
+    public List<TemplateArgument> templateArgs { get; set; } = new List<TemplateArgument>();
+}
+public class EnumDataType : DataType
+{
+    public int underlyingType { get; set; }
+    public List<EnumeratorField> enumerators { get; set; } = new List<EnumeratorField>();
+}
+public class FunctionDataType : DataType
+{
+    public int returnType { get; set; }
+    public List<int> argumentTypes { get; set; } = new List<int>();
+    public bool isVariadic { get; set; }
 }
 public class QualifiedType : Base
 {

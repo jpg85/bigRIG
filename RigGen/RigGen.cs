@@ -49,7 +49,7 @@ namespace RigGen
             //Other languages may approach this differently
             if (options.Language == Language.Cpp)
             {
-                var cppGen = new CppGen() { directories = options.Directories };
+                var cppGen = new CppGen(options.Directories);
                 var result = cppGen.Generate(options.OutputPath, options.AdditionalArgs);
                 JsonData.JsonFileHandler.WriteFile($"{options.OutputPath}/result.json", result);
             }

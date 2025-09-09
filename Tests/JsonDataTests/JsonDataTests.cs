@@ -12,12 +12,12 @@ public class Tests
         Assert.That(data, Is.Not.Null);
         Assert.That(data, Is.Empty);
     }
-    //Verify we can serialize a list with a single Version object
+    //Verify we can serialize a list with a single Message object
     [Test]
-    public void TestRoundTripSingleVersion()
+    public void TestRoundTripSingleMessage()
     {
         var tempFile = Path.GetTempFileName();
-        var version = new JsonData.Version
+        var message = new JsonData.Message
         {
             index = 0,
             name = "version",
@@ -27,19 +27,19 @@ public class Tests
                 line = 1,
                 column = 1
             },
-            versionString = "1.0.0"
+            message = "1.0.0"
         };
-        var list = new List<JsonData.Base> { version };
+        var list = new List<JsonData.Base> { message };
         JsonData.JsonFileHandler.WriteFile(tempFile, list);
         var data = JsonData.JsonFileHandler.ParseFile(tempFile);
         Assert.That(data, Is.Not.Null);
         Assert.That(data, Has.Count.EqualTo(list.Count));
-        Assert.That(data[0], Is.TypeOf<JsonData.Version>());
-        var parsedVersion = (JsonData.Version)data[0];
-        Assert.That(parsedVersion.index, Is.EqualTo(version.index));
-        Assert.That(parsedVersion.name, Is.EqualTo(version.name));
-        Assert.That(parsedVersion.location.file, Is.EqualTo(version.location.file));
-        Assert.That(parsedVersion.versionString, Is.EqualTo(version.versionString));
+        Assert.That(data[0], Is.TypeOf<JsonData.Message>());
+        var parsedMessage = (JsonData.Message)data[0];
+        Assert.That(parsedMessage.index, Is.EqualTo(message.index));
+        Assert.That(parsedMessage.name, Is.EqualTo(message.name));
+        Assert.That(parsedMessage.location.file, Is.EqualTo(message.location.file));
+        Assert.That(parsedMessage.message, Is.EqualTo(message.message));
     }
     //Verify we can round trip a single record object
     [Test]

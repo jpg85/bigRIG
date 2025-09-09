@@ -1,11 +1,16 @@
 namespace RigGen;
 
+using ClangSharp;
 using ClangSharp.Interop;
 using JsonData;
 
 public class CppGen
 {
-    public required IEnumerable<string> directories { get; set; }
+    public CppGen(IEnumerable<string> dirs)
+    {
+        directories = (from dir in dirs select NormalizedPath(dir)).ToList();
+    }
+    private List<string> directories;
     private readonly List<Base> parsedData = new List<Base>();
     private bool IsPathUser(string path)
     {
@@ -14,6 +19,7 @@ public class CppGen
     }
     private string NormalizedPath(string path)
     {
+        if (path == string.Empty) { return string.Empty; }
         return Path.GetFullPath(new Uri(path).LocalPath);
     }
     private Location GetLocation(CXCursor cursor)
@@ -64,6 +70,17 @@ public class CppGen
         }
         return headerFiles;
     }
+    private delegate CXChildVisitResult VisitCursor(CXCursor cursor);
+    private void WalkCursor(CXCursor cursor, VisitCursor action)
+    {
+        unsafe
+        {
+            cursor.VisitChildren((childCursor, _, _) =>
+            {
+                return action(childCursor);
+            }, new CXClientData(IntPtr.Zero));
+        }
+    }
     public List<Base> Generate(string outputDir, IEnumerable<string> additionalArgs)
     {
         var files = CollectHeaderFiles();
@@ -86,35 +103,64 @@ public class CppGen
         {
             throw new Exception("Failed to create translation unit");
         }
+        var numErrors =unit.NumDiagnostics;
+        for (uint i = 0; i < numErrors; i++)
+        {
+            var diag = unit.GetDiagnostic(i);
+            diag.Location.GetFileLocation(out var file, out uint line, out uint column, out uint _);
+            var message = diag.Format(CXDiagnosticDisplayOptions.CXDiagnostic_DisplaySourceLocation).ToString();
+            var severity = diag.Severity switch
+            {
+                CXDiagnosticSeverity.CXDiagnostic_Ignored => DiagnosticSeverity.Ignored,
+                CXDiagnosticSeverity.CXDiagnostic_Note => DiagnosticSeverity.Note,
+                CXDiagnosticSeverity.CXDiagnostic_Warning => DiagnosticSeverity.Warning,
+                CXDiagnosticSeverity.CXDiagnostic_Error => DiagnosticSeverity.Error,
+                CXDiagnosticSeverity.CXDiagnostic_Fatal => DiagnosticSeverity.Fatal,
+                _ => DiagnosticSeverity.Ignored,
+            };
+            var messageNode = new Message
+            {
+                location = new Location
+                {
+                    file = NormalizedPath(file.Name.ToString()),
+                    line = (int)line,
+                    column = (int)column
+                },
+                name = "Diagnostic",
+                message = message,
+                severity = severity,
+                category = diag.CategoryText.ToString(),
+            };
+            AddNode(messageNode);
+            Console.WriteLine(message);
+        }
+        //Collect the important cursors
         var decls = new List<CXCursor>();
         var records = new List<CXCursor>();
         var functions = new List<CXCursor>();
-        unsafe
+        WalkCursor(unit.Cursor, (cursor) =>
         {
-            unit.Cursor.VisitChildren((cursor, _, _) =>
+            switch (cursor.Kind)
             {
-                switch (cursor.Kind)
-                {
-                    case CXCursorKind.CXCursor_UsingDeclaration:
-                    case CXCursorKind.CXCursor_TypedefDecl:
-                        decls.Add(cursor);
-                        break;
-                    case CXCursorKind.CXCursor_ClassDecl:
-                    case CXCursorKind.CXCursor_StructDecl:
-                        records.Add(cursor);
-                        break;
-                    case CXCursorKind.CXCursor_FunctionDecl:
-                        functions.Add(cursor);
-                        break;
-                    case CXCursorKind.CXCursor_Namespace:
-                        //Need to recurse into the namespace to find more declarations
-                        return CXChildVisitResult.CXChildVisit_Recurse;
-                    default:
-                        break;
-                }
-                return CXChildVisitResult.CXChildVisit_Continue;
-            }, new CXClientData(IntPtr.Zero));
-        }
+                case CXCursorKind.CXCursor_UsingDeclaration:
+                case CXCursorKind.CXCursor_TypedefDecl:
+                    decls.Add(cursor);
+                    break;
+                case CXCursorKind.CXCursor_ClassDecl:
+                case CXCursorKind.CXCursor_StructDecl:
+                    records.Add(cursor);
+                    break;
+                case CXCursorKind.CXCursor_FunctionDecl:
+                    functions.Add(cursor);
+                    break;
+                case CXCursorKind.CXCursor_Namespace:
+                    //Need to recurse into the namespace to find more declarations
+                    return CXChildVisitResult.CXChildVisit_Recurse;
+                default:
+                    break;
+            }
+            return CXChildVisitResult.CXChildVisit_Continue;
+        });
         //While it shouldn't matter the order of traversal, we'll traverse records first, followed by functions, and lastly annotations
         foreach (var node in records)
         {
@@ -161,34 +207,32 @@ public class CppGen
         {
             return existingNode.index;
         }
+        //Add node here in case there is recursion, we want to have a node to refer to
+        AddNode(recordNode);
 
         recordNode.isAnonymous = cursor.IsAnonymous;
-        //Collect the different cursors in an unsafe context
-        //Then parse them not in an unsafe context
+        //Collect the different cursors
         var baseClasses = new List<CXCursor>();
         var fields = new List<CXCursor>();
         var methods = new List<CXCursor>();
-        unsafe
+        WalkCursor(cursor, (childCursor) =>
         {
-            cursor.VisitChildren((childCursor, _, _) =>
+            switch (childCursor.Kind)
             {
-                switch (childCursor.Kind)
-                {
-                    case CXCursorKind.CXCursor_CXXBaseSpecifier:
-                        baseClasses.Add(childCursor);
-                        break;
-                    case CXCursorKind.CXCursor_FieldDecl:
-                        fields.Add(childCursor);
-                        break;
-                    case CXCursorKind.CXCursor_CXXMethod:
-                        methods.Add(childCursor);
-                        break;
-                    default:
-                        break;
-                }
-                return CXChildVisitResult.CXChildVisit_Continue;
-            }, new CXClientData(IntPtr.Zero));
-        }
+                case CXCursorKind.CXCursor_CXXBaseSpecifier:
+                    baseClasses.Add(childCursor);
+                    break;
+                case CXCursorKind.CXCursor_FieldDecl:
+                    fields.Add(childCursor);
+                    break;
+                case CXCursorKind.CXCursor_CXXMethod:
+                    methods.Add(childCursor);
+                    break;
+                default:
+                    break;
+            }
+            return CXChildVisitResult.CXChildVisit_Continue;
+        });
         foreach (var node in baseClasses)
         {
             var baseRecord = new RecordBase();
@@ -210,7 +254,6 @@ public class CppGen
         {
             recordNode.functions.Add(ParseFunctionDeclaration(node, true));
         }
-        AddNode(recordNode);
         return recordNode.index;
     }
     int ParseFunctionDeclaration(CXCursor cursor, bool isMethod)
@@ -263,19 +306,15 @@ public class CppGen
         functionNode.comments = new List<string>(); //TODO: Extract comments
         functionNode.returnQualifiedType = ParseTypeKind(cursor.ResultType, functionNode.location);
         //Getting both the parameter name and the parameter type requires walking further down the AST
-        //Get a list of the cursors that point to the parameters, and then walk them in a safe context
         var paramNodes = new List<CXCursor>();
-        unsafe
+        WalkCursor(cursor, (childCursor) =>
         {
-            cursor.VisitChildren((childCursor, _, _) =>
+            if (childCursor.kind == CXCursorKind.CXCursor_ParmDecl)
             {
-                if (childCursor.kind == CXCursorKind.CXCursor_ParmDecl)
-                {
-                    paramNodes.Add(childCursor);
-                }
-                return CXChildVisitResult.CXChildVisit_Continue;
-            }, new CXClientData(IntPtr.Zero));
-        }
+                paramNodes.Add(childCursor);
+            }
+            return CXChildVisitResult.CXChildVisit_Continue;
+        });
         foreach (var node in paramNodes)
         {
             functionNode.parameters.Add(new Parameter
@@ -287,7 +326,123 @@ public class CppGen
         AddNode(functionNode);
         return functionNode.index;
     }
-    int ParseUnqualifiedType(CXType type, Location location)
+    DataType ParseBuiltinType(CXType type)
+    {
+        var kind = type.kind switch
+        {
+            CXTypeKind.CXType_Void => BuiltinDataType.Kind.Void,
+            CXTypeKind.CXType_Bool => BuiltinDataType.Kind.Bool,
+            CXTypeKind.CXType_Char_U or CXTypeKind.CXType_UChar => BuiltinDataType.Kind.UInt8,
+            CXTypeKind.CXType_Char_S or CXTypeKind.CXType_SChar => BuiltinDataType.Kind.Int8,
+            CXTypeKind.CXType_UShort => BuiltinDataType.Kind.UInt16,
+            CXTypeKind.CXType_Short or CXTypeKind.CXType_Char16 or CXTypeKind.CXType_WChar => BuiltinDataType.Kind.Int16,
+            CXTypeKind.CXType_UInt => BuiltinDataType.Kind.UInt32,
+            CXTypeKind.CXType_Int or CXTypeKind.CXType_Char32 => BuiltinDataType.Kind.Int32,
+            CXTypeKind.CXType_ULong or CXTypeKind.CXType_ULongLong => BuiltinDataType.Kind.UInt64,
+            CXTypeKind.CXType_Long or CXTypeKind.CXType_LongLong => BuiltinDataType.Kind.Int64,
+            CXTypeKind.CXType_UInt128 => BuiltinDataType.Kind.UInt128,
+            CXTypeKind.CXType_Int128 => BuiltinDataType.Kind.Int128,
+            CXTypeKind.CXType_Float16 => BuiltinDataType.Kind.Float16,
+            CXTypeKind.CXType_BFloat16 => BuiltinDataType.Kind.BFloat16,
+            CXTypeKind.CXType_Float => BuiltinDataType.Kind.Float,
+            CXTypeKind.CXType_Double => BuiltinDataType.Kind.Double,
+            CXTypeKind.CXType_LongDouble => BuiltinDataType.Kind.LongDouble,
+            CXTypeKind.CXType_Float128 => BuiltinDataType.Kind.Float128,
+            CXTypeKind.CXType_NullPtr => BuiltinDataType.Kind.Nullptr,
+            _ => BuiltinDataType.Kind.Unsupported,
+        };
+        return new BuiltinDataType { builtinKind = kind };
+    }
+    DataType ParseRecordType(CXCursor typeDecl)
+    {
+        //Collect template arguments by walking the cursor
+        var templateArgs = new List<JsonData.TemplateArgument>();
+        var templateArgsCount = clang.Cursor_getNumTemplateArguments(typeDecl);
+        if (templateArgsCount > 0)
+        {
+            for (uint i = 0; i < templateArgsCount; i++)
+            {
+                var argKind = clang.Cursor_getTemplateArgumentKind(typeDecl, i);
+                if (argKind == CXTemplateArgumentKind.CXTemplateArgumentKind_Type)
+                {
+                    var argType = clang.Cursor_getTemplateArgumentType(typeDecl, i);
+                    templateArgs.Add(new JsonData.TemplateArgument
+                    {
+                        kind = JsonData.TemplateArgument.Kind.Type,
+                        value = ParseUnqualifiedType(argType)
+                    });
+                }
+                else if (argKind == CXTemplateArgumentKind.CXTemplateArgumentKind_Integral)
+                {
+                    var argValue = clang.Cursor_getTemplateArgumentValue(typeDecl, i);
+                    templateArgs.Add(new JsonData.TemplateArgument
+                    {
+                        kind = JsonData.TemplateArgument.Kind.Integral,
+                        value = argValue
+                    });
+                }
+                else if (argKind == CXTemplateArgumentKind.CXTemplateArgumentKind_Pack)
+                {
+                    //It isn't clear how to tease apart a template argument pack, so just mark it as unknown
+                    Console.WriteLine("Warning: Template argument packs are not fully supported, marking as unknown");
+                    templateArgs.Add(new JsonData.TemplateArgument
+                    {
+                        kind = JsonData.TemplateArgument.Kind.Unknown,
+                        value = -1
+                    });
+                }
+                else
+                {
+                    templateArgs.Add(new JsonData.TemplateArgument
+                    {
+                        kind = JsonData.TemplateArgument.Kind.Unknown,
+                        value = -1
+                    });
+                }
+            }
+        }
+        var recordIndex = ParseClassDeclaration(typeDecl);
+        return new RecordDataType
+        {
+            recordType = recordIndex,
+            templateArgs = templateArgs
+        };
+    }
+    DataType ParseEnumType(CXCursor typeDecl)
+    {
+        var enumNodes = new List<CXCursor>();
+        WalkCursor(typeDecl, (childCursor) =>
+        {
+            if (childCursor.kind == CXCursorKind.CXCursor_EnumConstantDecl)
+            {
+                enumNodes.Add(childCursor);
+            }
+            return CXChildVisitResult.CXChildVisit_Continue;
+        });
+        return new EnumDataType
+        {
+            underlyingType = ParseUnqualifiedType(clang.getEnumDeclIntegerType(typeDecl)),
+            enumerators = (from node in enumNodes select new EnumeratorField
+            {
+                name = node.Spelling.ToString(),
+                value = node.EnumConstantDeclValue
+            }).ToList()
+        };
+    }
+    DataType ParseFunctionType(CXType type)
+    {
+        var argCount = clang.getNumArgTypes(type);
+        var retType = clang.getResultType(type);
+        var isVariadic = clang.isFunctionTypeVariadic(type);
+        return new FunctionDataType
+        {
+            returnType = ParseUnqualifiedType(retType),
+            argumentTypes = (from i in Enumerable.Range(0, argCount)
+                             select ParseUnqualifiedType(clang.getArgType(type, (uint)i))).ToList(),
+            isVariadic = isVariadic != 0
+        };
+    }
+    int ParseUnqualifiedType(CXType type)
     {
         var name = type.Spelling.ToString();
         //See if this type node already exists, if so, return that index
@@ -298,11 +453,17 @@ public class CppGen
             return existingNode.index;
         }
         //Otherwise, create a new type node
-        var typeNode = new DataType
+        var typeDecl = clang.getTypeDeclaration(type);
+        var typeNode = type.kind switch
         {
-            name = name,
-            location = location
+            >=CXTypeKind.CXType_FirstBuiltin and <= CXTypeKind.CXType_LastBuiltin => ParseBuiltinType(type),
+            CXTypeKind.CXType_Record => ParseRecordType(typeDecl),
+            CXTypeKind.CXType_Enum => ParseEnumType(typeDecl),
+            CXTypeKind.CXType_FunctionNoProto or CXTypeKind.CXType_FunctionProto => ParseFunctionType(type),
+            _ => new UnknownDataType(),
         };
+        typeNode.name = name;
+        typeNode.location = GetLocation(typeDecl);
 
         AddNode(typeNode);
         return typeNode.index;
@@ -331,13 +492,13 @@ public class CppGen
     }
     int ParseTypeKind(CXType typeKind, Location location)
     {
-        var canonincalType = typeKind.CanonicalType;
-        var qualifiers = GetQualifiers(canonincalType, out var unqualifiedType);
+        var canonicalType = clang.getCanonicalType(typeKind);
+        var qualifiers = GetQualifiers(canonicalType, out var unqualifiedType);
         var typeNode = new QualifiedType
         {
-            name = canonincalType.Spelling.ToString(),
+            name = typeKind.Spelling.ToString(),
             location = location,
-            dataType = ParseUnqualifiedType(unqualifiedType, location),
+            dataType = ParseUnqualifiedType(unqualifiedType),
             qualifiers = qualifiers,
         };
         //See if this qualified type node already exists, if so, return that index
