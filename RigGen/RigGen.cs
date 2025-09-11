@@ -1,6 +1,6 @@
 ﻿using CommandLine;
 
-namespace RigGen
+namespace BigRig.RigGen
 {
     class RigGen
     {

@@ -1,4 +1,4 @@
-﻿namespace JsonData;
+﻿namespace BigRig.JsonData;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 

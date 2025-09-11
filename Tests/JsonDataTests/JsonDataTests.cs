@@ -1,4 +1,4 @@
-﻿namespace JsonDataTests;
+﻿namespace BigRig.JsonDataTests;
 
 public class Tests
 {

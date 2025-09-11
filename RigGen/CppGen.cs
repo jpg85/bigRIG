@@ -1,4 +1,4 @@
-namespace RigGen;
+namespace BigRig.RigGen;
 
 using ClangSharp;
 using ClangSharp.Interop;

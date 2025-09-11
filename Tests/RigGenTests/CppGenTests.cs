@@ -1,6 +1,6 @@
-﻿using JsonData;
+﻿using BigRig.JsonData;
 
-namespace RigGenTests;
+namespace BigRig.RigGenTests;
 
 public class Tests
 {
@@ -46,6 +46,8 @@ public class Tests
                 }
             }
         }
+        //Disable LLVM crash recovery to avoid issues with libclang under debugger
+        Environment.SetEnvironmentVariable("LIBCLANG_DISABLE_CRASH_RECOVERY", "1");
     }
     //Parse a simple function declaration
     [Test]
